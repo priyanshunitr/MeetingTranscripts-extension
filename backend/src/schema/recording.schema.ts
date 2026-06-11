@@ -143,6 +143,13 @@ export const CompleteRecordingUploadSchema = z.object({
   durationSeconds: z.number().nonnegative(),
 });
 
+export const CompleteRecordingBrowserTranscriptSchema = z.object({
+  fileSize: z.number().int().nonnegative(),
+  durationSeconds: z.number().nonnegative(),
+  transcript: z.string().min(1),
+  language: z.string().min(1).default("en-US"),
+});
+
 export type RecordingType = z.infer<typeof RecordingTypeSchema>;
 export type RecordingStatus = z.infer<typeof RecordingStatusSchema>;
 export type ActionItemStatus = z.infer<typeof ActionItemStatusSchema>;
@@ -162,4 +169,7 @@ export type CreateRecordingUploadUrlInput = z.infer<
 >;
 export type CompleteRecordingUploadInput = z.infer<
   typeof CompleteRecordingUploadSchema
+>;
+export type CompleteRecordingBrowserTranscriptInput = z.infer<
+  typeof CompleteRecordingBrowserTranscriptSchema
 >;

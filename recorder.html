@@ -4,16 +4,92 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Recorder</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
-    <h2>Screen Recorder</h2>
-    <div>
-      <button id="recToggle">Start Recording</button>
-      <a id="downloadLink" style="display:none;margin-left:8px;">Download</a>
-    </div>
-    <div style="margin-top:8px;">
-      <video id="preview" style="width:480px;height:270px;background:#000;" playsinline muted></video>
-    </div>
+  <body class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Recorder</h1>
+        <p id="recorderStatus">Ready</p>
+      </div>
+      <div class="toolbar">
+        <button class="secondary" id="openDashboard">Recordings</button>
+        <button class="secondary" id="openSettings">Settings</button>
+      </div>
+    </header>
+
+    <main class="page stack">
+      <section class="panel stack">
+        <div id="recordingMessage" hidden></div>
+
+        <div class="grid grid-2">
+          <label>
+            Title
+            <input id="recordingTitle" value="Screen Recording" />
+          </label>
+          <label>
+            Type
+            <select id="recordingType">
+              <option value="meeting">Meeting</option>
+              <option value="lecture">Lecture</option>
+              <option value="interview">Interview</option>
+              <option value="voice_note">Voice note</option>
+              <option value="call">Call</option>
+            </select>
+          </label>
+        </div>
+
+        <label>
+          Description
+          <textarea id="recordingDescription" placeholder="Optional notes"></textarea>
+        </label>
+
+        <div class="grid grid-2">
+          <label>
+            Speech language
+            <input id="speechLanguage" value="en-US" />
+          </label>
+          <div class="metric">
+            <span class="muted small">Speech</span>
+            <strong id="speechValue">Idle</strong>
+          </div>
+        </div>
+
+        <label>
+          Browser transcript
+          <textarea id="browserTranscript" placeholder="Live transcript appears here"></textarea>
+        </label>
+
+        <div class="toolbar">
+          <button id="recToggle">Start recording</button>
+          <button class="secondary" id="uploadRecording" hidden>Upload to backend</button>
+          <a id="downloadLink" class="button secondary" hidden>Download local copy</a>
+          <a id="recordingLink" class="button secondary" hidden>Open recording</a>
+        </div>
+      </section>
+
+      <section class="panel stack">
+        <video id="preview" class="video-preview" playsinline muted></video>
+        <div class="metric-row">
+          <div class="metric">
+            <span class="muted small">Duration</span>
+            <strong id="durationValue">0:00</strong>
+          </div>
+          <div class="metric">
+            <span class="muted small">Size</span>
+            <strong id="sizeValue">0 B</strong>
+          </div>
+          <div class="metric">
+            <span class="muted small">Backend ID</span>
+            <strong id="recordingIdValue">None</strong>
+          </div>
+          <div class="metric">
+            <span class="muted small">Upload</span>
+            <strong id="uploadValue">Idle</strong>
+          </div>
+        </div>
+      </section>
+    </main>
 
     <script type="module" src="dist/recorder.js"></script>
   </body>

@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response } from "express";
 import {
+  CompleteRecordingBrowserTranscriptSchema,
   CompleteRecordingUploadSchema,
   CreateRecordingSchema,
   CreateRecordingUploadUrlSchema,
@@ -9,6 +10,7 @@ import {
 } from "../schema/recording.schema";
 import { ImportGoogleMeetSchema } from "../schema/google-meet.schema";
 import {
+  completeRecordingBrowserTranscript,
   completeRecordingUpload,
   createRecording,
   createRecordingUploadUrl,
@@ -138,6 +140,36 @@ router.post(
         200,
         recording,
         "Recording upload completed successfully",
+      ),
+    );
+  }),
+);
+
+//----------------------------------------------------------------------------------------------------------------
+
+// POST /recordings/:recordingId/browser-transcript-complete
+router.post(
+  "/:recordingId/browser-transcript-complete",
+  asyncHandler(async (req: Request, res: Response) => {
+    const input = parseRequest(
+      CompleteRecordingBrowserTranscriptSchema.safeParse(req.body),
+      "Invalid browser transcript complete request",
+    );
+
+    const recording = await completeRecordingBrowserTranscript(getRecordingId(req), {
+      ...input,
+      userId: getAuthenticatedUserId(req),
+    });
+
+    if (!recording) {
+      throw new ApiError(404, "Recording not found");
+    }
+
+    res.json(
+      new ApiResponse(
+        200,
+        recording,
+        "Recording browser transcript completed successfully",
       ),
     );
   }),

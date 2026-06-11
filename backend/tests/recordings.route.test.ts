@@ -8,6 +8,7 @@ const mockUpdateRecording = vi.fn();
 const mockDeleteRecording = vi.fn();
 const mockCreateRecordingUploadUrl = vi.fn();
 const mockCompleteRecordingUpload = vi.fn();
+const mockCompleteRecordingBrowserTranscript = vi.fn();
 const mockSearchRecordings = vi.fn();
 const mockImportGoogleMeetRecording = vi.fn();
 const mockTranscribeAudioUrl = vi.fn();
@@ -34,6 +35,7 @@ vi.mock("../src/services/recording.services", () => ({
   deleteRecording: mockDeleteRecording,
   createRecordingUploadUrl: mockCreateRecordingUploadUrl,
   completeRecordingUpload: mockCompleteRecordingUpload,
+  completeRecordingBrowserTranscript: mockCompleteRecordingBrowserTranscript,
 }));
 
 vi.mock("../src/services/search.services", () => ({
@@ -120,6 +122,40 @@ describe("recordings routes", () => {
         userId: "user_123",
       }),
     );
+  });
+
+  //----------------------------------------------------------------------------------------------------------------
+
+  it("completes a recording with a browser transcript without calling upload-complete", async () => {
+    mockCompleteRecordingBrowserTranscript.mockResolvedValue({
+      id: "recording_123",
+      status: "transcribed",
+      transcript: {
+        provider: "web-speech",
+      },
+    });
+
+    const response = await request(app)
+      .post("/recordings/recording_123/browser-transcript-complete")
+      .send({
+        fileSize: 1234,
+        durationSeconds: 60,
+        transcript: "Browser captured transcript",
+        language: "en-US",
+      });
+
+    expect(response.status).toBe(200);
+    expect(mockCompleteRecordingBrowserTranscript).toHaveBeenCalledWith(
+      "recording_123",
+      {
+        fileSize: 1234,
+        durationSeconds: 60,
+        transcript: "Browser captured transcript",
+        language: "en-US",
+        userId: "user_123",
+      },
+    );
+    expect(mockCompleteRecordingUpload).not.toHaveBeenCalled();
   });
 
   //----------------------------------------------------------------------------------------------------------------

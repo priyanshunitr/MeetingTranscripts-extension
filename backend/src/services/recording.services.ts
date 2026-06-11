@@ -1,13 +1,17 @@
 import { admin, firestore } from "../lib/firestore";
 import { RECORDINGS_COLLECTION } from "../models/recording.model";
 import type {
+  CompleteRecordingBrowserTranscriptInput,
   CompleteRecordingUploadInput,
   CreateRecordingInput,
   CreateRecordingUploadUrlInput,
   UpdateRecordingInput,
 } from "../schema/recording.schema";
 import { ApiError } from "../utils/ApiError.js";
-import { enqueueTranscribeRecording } from "../jobs/recording.queue";
+import {
+  enqueueSummarizeRecording,
+  enqueueTranscribeRecording,
+} from "../jobs/recording.queue";
 import { deleteRecordingVectors } from "./qdrant.services";
 import { createSignedUploadUrl } from "./s3.services";
 import { incrementUsageMetrics } from "./usage.services";
@@ -101,6 +105,12 @@ const getRecordingAudioFileUrl = (recording: AppRecording) => {
 
 const secondsToMinutes = (seconds: number) => {
   return seconds / 60;
+};
+
+//----------------------------------------------------------------------------------------------------------------
+
+const getWordCount = (transcript: string) => {
+  return transcript.trim() ? transcript.trim().split(/\s+/).length : 0;
 };
 
 //----------------------------------------------------------------------------------------------------------------
@@ -270,6 +280,53 @@ export const completeRecordingUpload = async (
   });
 
   await enqueueTranscribeRecording({
+    recordingId,
+    userId: input.userId,
+  });
+
+  return findRecordingById(recordingId, input.userId);
+};
+
+//----------------------------------------------------------------------------------------------------------------
+
+// Marks an upload as complete using a browser-generated transcript, then skips Deepgram and queues AI processing.
+export const completeRecordingBrowserTranscript = async (
+  recordingId: string,
+  input: CompleteRecordingBrowserTranscriptInput & { userId: string },
+) => {
+  const existing = await findRecordingById(recordingId, input.userId);
+
+  if (!existing) {
+    return null;
+  }
+
+  getRecordingAudioFileUrl(existing);
+
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const transcript = input.transcript.trim();
+
+  await recordingsCollection().doc(recordingId).update({
+    status: "transcribed",
+    "audio.fileSize": input.fileSize,
+    "audio.durationSeconds": input.durationSeconds,
+    "audio.uploadedAt": now,
+    "transcript.fullText": transcript,
+    "transcript.language": input.language,
+    "transcript.wordCount": getWordCount(transcript),
+    "transcript.provider": "web-speech",
+    "transcript.deepgramRequestId": "",
+    "transcript.transcribedAt": now,
+    "search.embeddingStatus": "transcribed",
+    updatedAt: now,
+  });
+
+  await incrementUsageMetrics({
+    userId: input.userId,
+    recordingMinutes: secondsToMinutes(input.durationSeconds),
+    storageBytes: input.fileSize,
+  });
+
+  await enqueueSummarizeRecording({
     recordingId,
     userId: input.userId,
   });

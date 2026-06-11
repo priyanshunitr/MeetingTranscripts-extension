@@ -1,77 +1,99 @@
-import random from 'lodash-es/random';
+import {
+  api,
+  getConfig,
+  openExtensionPage,
+  openRecorderWindow,
+} from './api.js';
+import {
+  $,
+  escapeHtml,
+  formatDate,
+  formatDuration,
+  setText,
+  showMessage,
+  statusClass,
+} from './ui.js';
 
-const btn = document.getElementById('gen');
-const out = document.getElementById('out');
+const backendStatus = $('#backendStatus');
+const popupMessage = $('#popupMessage');
+const recentRecordings = $('#recentRecordings');
 
-function show() {
-  const n = random(1, 10);
-  console.log('random', n);
-  out.textContent = 'Random: ' + n;
-}
+const renderRecentRecordings = (recordings) => {
+  if (!recentRecordings) return;
 
-btn?.addEventListener('click', show);
-show();
-
-// --- Screen recording UI ---
-const recBtn = document.getElementById('recToggle');
-const preview = document.getElementById('preview');
-const downloadLink = document.getElementById('downloadLink');
-
-let mediaRecorder = null;
-let recordedChunks = [];
-
-async function startRecording() {
-  try {
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    preview.srcObject = stream;
-    await preview.play().catch(()=>{});
-
-    recordedChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recordedChunks.push(ev.data); };
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      downloadLink.href = url;
-      downloadLink.download = 'screen-recording.webm';
-      downloadLink.style.display = 'inline';
-    };
-
-    mediaRecorder.start();
-    recBtn.textContent = 'Stop Recording';
-  } catch (err) {
-    console.error('startRecording failed', err);
-    alert('Screen capture failed: ' + (err && err.message ? err.message : err));
+  if (!recordings.length) {
+    recentRecordings.innerHTML = '<div class="empty-state">No recordings found.</div>';
+    return;
   }
-}
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-  if (preview.srcObject) {
-    const tracks = preview.srcObject.getTracks();
-    tracks.forEach(t => t.stop());
-    preview.srcObject = null;
-  }
-  recBtn.textContent = 'Start Recording';
-}
+  recentRecordings.innerHTML = recordings
+    .slice(0, 5)
+    .map((recording) => {
+      const duration = formatDuration(recording.audio?.durationSeconds);
+      const date = formatDate(recording.createdAt);
 
-recBtn?.addEventListener('click', () => {
-  // Open a persistent recorder window so recording won't stop when popup loses focus
-  if (typeof chrome !== 'undefined' && chrome.windows && chrome.runtime) {
-    chrome.windows.create({
-      url: chrome.runtime.getURL('recorder.html'),
-      type: 'popup',
-      width: 520,
-      height: 420
-    }, () => {
-      // close the popup immediately to avoid duplicate UIs
-      try { window.close(); } catch (e) {}
+      return `
+        <button class="card" data-recording-id="${escapeHtml(recording.id)}">
+          <strong>${escapeHtml(recording.title || 'Untitled Recording')}</strong>
+          <span class="status-pill ${statusClass(recording.status)}">${escapeHtml(recording.status)}</span>
+          <span class="muted small">${escapeHtml(duration)} · ${escapeHtml(date)}</span>
+        </button>
+      `;
+    })
+    .join('');
+
+  recentRecordings.querySelectorAll('[data-recording-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openExtensionPage('recordings.html', {
+        id: button.dataset.recordingId,
+      });
     });
-  } else {
-    // Fallback: start recording in the popup (may stop when focus is lost)
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') startRecording();
-    else stopRecording();
+  });
+};
+
+const loadPopup = async () => {
+  showMessage(popupMessage, '', 'info');
+  setText(backendStatus, 'Checking backend...');
+
+  try {
+    const config = await getConfig();
+    await api.health();
+
+    if (!config.authToken) {
+      setText(backendStatus, 'Backend reachable');
+      showMessage(
+        popupMessage,
+        'Add a Firebase ID token in Settings to load recordings.',
+        'info',
+      );
+      renderRecentRecordings([]);
+      return;
+    }
+
+    const user = await api.me();
+    const recordings = await api.listRecordings();
+    const label = user.email || user.name || user.id || 'authenticated';
+
+    setText(backendStatus, label);
+    renderRecentRecordings(recordings);
+  } catch (err) {
+    setText(backendStatus, 'Backend unavailable');
+    showMessage(popupMessage, err.message || 'Unable to reach backend.', 'error');
+    renderRecentRecordings([]);
+  }
+};
+
+$('#startRecording')?.addEventListener('click', () => {
+  openRecorderWindow();
+  try {
+    window.close();
+  } catch (_err) {
+    // Popup close can fail outside Chrome extension contexts.
   }
 });
+
+$('#openDashboard')?.addEventListener('click', () => openExtensionPage('recordings.html'));
+$('#openSettings')?.addEventListener('click', () => openExtensionPage('settings.html'));
+$('#refreshPopup')?.addEventListener('click', loadPopup);
+
+loadPopup();

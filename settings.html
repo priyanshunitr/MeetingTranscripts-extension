@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Meeting Transcripts Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Settings</h1>
+        <p>Backend connection</p>
+      </div>
+      <div class="toolbar">
+        <button class="secondary" id="openDashboard">Recordings</button>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="panel stack">
+        <div id="settingsMessage" hidden></div>
+
+        <label>
+          Backend URL
+          <input id="backendUrl" type="url" placeholder="http://localhost:3000" />
+        </label>
+
+        <label>
+          Firebase ID token
+          <textarea id="authToken" spellcheck="false" placeholder="Paste a Firebase ID token"></textarea>
+        </label>
+
+        <div class="toolbar">
+          <button id="saveSettings">Save</button>
+          <button class="secondary" id="testConnection">Test connection</button>
+          <button class="secondary" id="clearToken">Clear token</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="dist/settings.js"></script>
+  </body>
+</html>

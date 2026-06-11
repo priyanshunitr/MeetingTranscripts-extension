@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/popup.js src/recorder.js --bundle --outdir=dist --minify",
+    "build": "esbuild src/popup.js src/recorder.js src/settings.js src/recordings.js --bundle --outdir=dist --minify",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
