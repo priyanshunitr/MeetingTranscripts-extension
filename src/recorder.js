@@ -39,8 +39,89 @@ const updateDuration = () => {
   setText('#durationValue', formatDuration(getDurationSeconds()));
 };
 
+const hasAudioTracks = (stream) => {
+  return !!stream?.getAudioTracks().length;
+};
+
+const chooseDesktopMedia = () => {
+  return new Promise((resolve, reject) => {
+    if (!chrome?.desktopCapture?.chooseDesktopMedia) {
+      reject(new Error('Chrome desktop capture is not available.'));
+      return;
+    }
+
+    chrome.desktopCapture.chooseDesktopMedia(
+      ['tab', 'audio'],
+      (streamId, options) => {
+        if (!streamId) {
+          reject(new Error('Tab capture was cancelled.'));
+          return;
+        }
+
+        resolve({
+          streamId,
+          canRequestAudioTrack: options?.canRequestAudioTrack !== false,
+        });
+      },
+    );
+  });
+};
+
+const captureDisplayStream = async () => {
+  if (!chrome?.desktopCapture?.chooseDesktopMedia) {
+    return navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: 30,
+      },
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 2,
+      },
+      systemAudio: 'include',
+      surfaceSwitching: 'include',
+    });
+  }
+
+  const { streamId, canRequestAudioTrack } = await chooseDesktopMedia();
+  const desktopVideo = {
+    mandatory: {
+      chromeMediaSource: 'desktop',
+      chromeMediaSourceId: streamId,
+      maxFrameRate: 30,
+    },
+  };
+  const desktopAudio = {
+    mandatory: {
+      chromeMediaSource: 'desktop',
+      chromeMediaSourceId: streamId,
+    },
+  };
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: desktopVideo,
+      audio: canRequestAudioTrack ? desktopAudio : false,
+    });
+  } catch (err) {
+    if (!canRequestAudioTrack) throw err;
+
+    showMessage(
+      message,
+      'Computer audio was not available for that source. Recording video and microphone audio only.',
+      'info',
+    );
+
+    return navigator.mediaDevices.getUserMedia({
+      video: desktopVideo,
+      audio: false,
+    });
+  }
+};
+
 const connectAudioSource = (destination, stream) => {
-  if (!stream.getAudioTracks().length) return;
+  if (!hasAudioTracks(stream)) return;
 
   const source = audioContext.createMediaStreamSource(stream);
   source.connect(destination);
@@ -63,7 +144,7 @@ const buildRecorderStream = async (displayStream) => {
 
   const videoTracks = displayStream.getVideoTracks();
   const audioStreams = [displayStream, microphoneStream].filter(
-    (stream) => stream?.getAudioTracks().length,
+    (stream) => hasAudioTracks(stream),
   );
 
   if (!audioStreams.length) {
@@ -71,6 +152,8 @@ const buildRecorderStream = async (displayStream) => {
   }
 
   audioContext = new AudioContext();
+  await audioContext.resume().catch(() => undefined);
+
   const destination = audioContext.createMediaStreamDestination();
   audioStreams.forEach((stream) => connectAudioSource(destination, stream));
 
@@ -141,13 +224,18 @@ const startRecording = async () => {
     setText('#durationValue', '0:00');
     setStatus('Requesting capture');
 
-    const displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true,
-    });
+    const displayStream = await captureDisplayStream();
     mediaStream = await buildRecorderStream(displayStream);
     preview.srcObject = displayStream;
     await preview.play().catch(() => undefined);
+
+    if (!hasAudioTracks(displayStream)) {
+      showMessage(
+        message,
+        'Tab audio was not shared. Select a Chrome tab that is playing audio and enable Share tab audio in the picker.',
+        'info',
+      );
+    }
 
     recordedChunks = [];
     startedAt = Date.now();
