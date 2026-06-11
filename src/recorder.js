@@ -1,28 +1,18 @@
-import {
-  api,
-  getConfig,
-  getExtensionUrl,
-  openExtensionPage,
-  uploadToSignedUrl,
-} from './api.js';
 import { $, formatBytes, formatDuration, setText, showMessage } from './ui.js';
 
 let mediaRecorder = null;
 let mediaStream = null;
+let screenStream = null;
+let microphoneStream = null;
+let audioContext = null;
 let recordedChunks = [];
 let startedAt = 0;
 let durationTimer = null;
 let activeObjectUrl = '';
-let speechRecognition = null;
-let shouldRunSpeechRecognition = false;
-let finalTranscriptParts = [];
-let pendingUpload = null;
 
 const recBtn = $('#recToggle');
 const preview = $('#preview');
 const downloadLink = $('#downloadLink');
-const recordingLink = $('#recordingLink');
-const uploadBtn = $('#uploadRecording');
 const message = $('#recordingMessage');
 
 const supportedMimeType = () => {
@@ -39,113 +29,6 @@ const setStatus = (value) => {
   setText('#recorderStatus', value);
 };
 
-const setUploadState = (value) => {
-  setText('#uploadValue', value);
-};
-
-const setSpeechState = (value) => {
-  setText('#speechValue', value);
-};
-
-const getSpeechRecognitionConstructor = () => {
-  return window.SpeechRecognition || window.webkitSpeechRecognition;
-};
-
-const getTranscriptText = () => {
-  return $('#browserTranscript')?.value?.trim() || '';
-};
-
-const setTranscriptText = (value) => {
-  const transcript = $('#browserTranscript');
-
-  if (transcript) {
-    transcript.value = value;
-  }
-};
-
-const resetBrowserTranscript = () => {
-  finalTranscriptParts = [];
-  setTranscriptText('');
-};
-
-const syncBrowserTranscript = (interimTranscript = '') => {
-  const transcript = [...finalTranscriptParts, interimTranscript]
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  setTranscriptText(transcript);
-};
-
-const startSpeechRecognition = () => {
-  const SpeechRecognition = getSpeechRecognitionConstructor();
-
-  if (!SpeechRecognition) {
-    throw new Error('Browser speech recognition is not supported in this browser.');
-  }
-
-  shouldRunSpeechRecognition = true;
-  speechRecognition = new SpeechRecognition();
-  speechRecognition.continuous = true;
-  speechRecognition.interimResults = true;
-  speechRecognition.maxAlternatives = 1;
-  speechRecognition.lang = $('#speechLanguage')?.value?.trim() || 'en-US';
-  speechRecognition.onstart = () => setSpeechState('Listening');
-  speechRecognition.onresult = (event) => {
-    let interimTranscript = '';
-
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const result = event.results[index];
-      const transcript = result[0]?.transcript || '';
-
-      if (result.isFinal) {
-        finalTranscriptParts.push(transcript.trim());
-      } else {
-        interimTranscript += ` ${transcript}`;
-      }
-    }
-
-    syncBrowserTranscript(interimTranscript);
-  };
-  speechRecognition.onerror = (event) => {
-    setSpeechState(event.error || 'Error');
-  };
-  speechRecognition.onend = () => {
-    if (!shouldRunSpeechRecognition) {
-      setSpeechState('Stopped');
-      return;
-    }
-
-    setSpeechState('Restarting');
-    setTimeout(() => {
-      if (!shouldRunSpeechRecognition || !speechRecognition) return;
-
-      try {
-        speechRecognition.start();
-      } catch (_err) {
-        setSpeechState('Waiting');
-      }
-    }, 500);
-  };
-
-  speechRecognition.start();
-};
-
-const stopSpeechRecognition = () => {
-  shouldRunSpeechRecognition = false;
-
-  if (!speechRecognition) {
-    setSpeechState('Idle');
-    return;
-  }
-
-  try {
-    speechRecognition.stop();
-  } catch (_err) {
-    setSpeechState('Stopped');
-  }
-};
-
 const getDurationSeconds = () => {
   if (!startedAt) return 0;
 
@@ -156,31 +39,61 @@ const updateDuration = () => {
   setText('#durationValue', formatDuration(getDurationSeconds()));
 };
 
-const buildFileName = () => {
-  const title = $('#recordingTitle')?.value || 'screen-recording';
-  const slug = title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 60);
+const connectAudioSource = (destination, stream) => {
+  if (!stream.getAudioTracks().length) return;
 
-  return `${slug || 'screen-recording'}-${Date.now()}.webm`;
+  const source = audioContext.createMediaStreamSource(stream);
+  source.connect(destination);
 };
 
-const getRecordingInput = () => {
-  return {
-    title: $('#recordingTitle')?.value?.trim() || 'Screen Recording',
-    description: $('#recordingDescription')?.value?.trim() || '',
-    type: $('#recordingType')?.value || 'meeting',
-  };
+const buildRecorderStream = async (displayStream) => {
+  screenStream = displayStream;
+
+  try {
+    microphoneStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (_err) {
+    microphoneStream = null;
+  }
+
+  const videoTracks = displayStream.getVideoTracks();
+  const audioStreams = [displayStream, microphoneStream].filter(
+    (stream) => stream?.getAudioTracks().length,
+  );
+
+  if (!audioStreams.length) {
+    return new MediaStream(videoTracks);
+  }
+
+  audioContext = new AudioContext();
+  const destination = audioContext.createMediaStreamDestination();
+  audioStreams.forEach((stream) => connectAudioSource(destination, stream));
+
+  return new MediaStream([
+    ...videoTracks,
+    ...destination.stream.getAudioTracks(),
+  ]);
 };
 
 const stopStream = () => {
-  if (!mediaStream) return;
+  [mediaStream, screenStream, microphoneStream].forEach((stream) => {
+    stream?.getTracks().forEach((track) => track.stop());
+  });
 
-  mediaStream.getTracks().forEach((track) => track.stop());
   mediaStream = null;
+  screenStream = null;
+  microphoneStream = null;
+
+  if (audioContext) {
+    audioContext.close().catch(() => undefined);
+    audioContext = null;
+  }
+
   preview.srcObject = null;
 };
 
@@ -189,6 +102,10 @@ const resetRecordingUi = () => {
   recBtn.textContent = 'Start recording';
   clearInterval(durationTimer);
   durationTimer = null;
+};
+
+const buildFileName = () => {
+  return `screen-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
 };
 
 const prepareDownload = (blob, fileName) => {
@@ -202,130 +119,34 @@ const prepareDownload = (blob, fileName) => {
   downloadLink.hidden = false;
 };
 
-const uploadRecording = async (blob, durationSeconds, fileName, transcript, language) => {
-  const config = await getConfig();
-
-  if (!config.authToken) {
-    throw new Error('Add a Firebase ID token in Settings before uploading.');
-  }
-
-  if (!transcript.trim()) {
-    throw new Error('No browser transcript captured. Add transcript text before uploading.');
-  }
-
-  setUploadState('Creating');
-  const recording = await api.createRecording(getRecordingInput());
-  setText('#recordingIdValue', recording.id);
-
-  const mimeType = blob.type || mediaRecorder?.mimeType || 'video/webm';
-
-  setUploadState('Signing');
-  const upload = await api.createUploadUrl(recording.id, {
-    fileName,
-    mimeType,
-    fileSize: blob.size,
-    durationSeconds,
-  });
-
-  setUploadState('Uploading');
-  await uploadToSignedUrl(upload, blob);
-
-  setUploadState('Completing');
-  await api.completeBrowserTranscript(recording.id, {
-    fileSize: blob.size,
-    durationSeconds,
-    transcript,
-    language,
-  });
-
-  recordingLink.href = getExtensionUrl('recordings.html', { id: recording.id });
-  recordingLink.hidden = false;
-  uploadBtn.hidden = true;
-  setUploadState('Done');
-  showMessage(
-    message,
-    'Recording uploaded with browser transcript. AI processing will continue in the backend worker.',
-    'success',
-  );
-};
-
-const uploadPendingRecording = async () => {
-  if (!pendingUpload) return;
-
-  uploadBtn.disabled = true;
-
-  try {
-    setStatus('Uploading');
-    await uploadRecording(
-      pendingUpload.blob,
-      pendingUpload.durationSeconds,
-      pendingUpload.fileName,
-      getTranscriptText(),
-      $('#speechLanguage')?.value?.trim() || 'en-US',
-    );
-    setStatus('Uploaded');
-  } catch (err) {
-    setStatus('Upload failed');
-    setUploadState('Failed');
-    showMessage(message, err.message || 'Upload failed.', 'error');
-  } finally {
-    uploadBtn.disabled = false;
-  }
-};
-
-const handleRecordingStopped = async () => {
+const handleRecordingStopped = () => {
   const durationSeconds = getDurationSeconds();
   const mimeType = mediaRecorder?.mimeType || supportedMimeType() || 'video/webm';
   const blob = new Blob(recordedChunks, { type: mimeType });
-  const fileName = buildFileName();
 
-  stopSpeechRecognition();
   stopStream();
   resetRecordingUi();
   setText('#sizeValue', formatBytes(blob.size));
   setText('#durationValue', formatDuration(durationSeconds));
-  prepareDownload(blob, fileName);
-  pendingUpload = {
-    blob,
-    durationSeconds,
-    fileName,
-  };
-  uploadBtn.hidden = false;
-
-  if (!getTranscriptText()) {
-    setStatus('Transcript needed');
-    showMessage(
-      message,
-      'No browser transcript was captured. Add transcript text, then upload.',
-      'error',
-    );
-    return;
-  }
-
-  await uploadPendingRecording();
+  prepareDownload(blob, buildFileName());
+  setStatus('Ready to download');
+  showMessage(message, 'Recording finished. Download your local copy.', 'success');
 };
 
 const startRecording = async () => {
   try {
     showMessage(message, '', 'info');
     downloadLink.hidden = true;
-    recordingLink.hidden = true;
-    uploadBtn.hidden = true;
-    pendingUpload = null;
-    resetBrowserTranscript();
-    setText('#recordingIdValue', 'None');
     setText('#sizeValue', '0 B');
-    setUploadState('Idle');
-    setSpeechState('Idle');
+    setText('#durationValue', '0:00');
     setStatus('Requesting capture');
 
-    startSpeechRecognition();
-
-    mediaStream = await navigator.mediaDevices.getDisplayMedia({
+    const displayStream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: true,
     });
-    preview.srcObject = mediaStream;
+    mediaStream = await buildRecorderStream(displayStream);
+    preview.srcObject = displayStream;
     await preview.play().catch(() => undefined);
 
     recordedChunks = [];
@@ -344,7 +165,7 @@ const startRecording = async () => {
       }
     };
     mediaRecorder.onstop = handleRecordingStopped;
-    mediaStream.getTracks().forEach((track) => {
+    screenStream.getTracks().forEach((track) => {
       track.addEventListener('ended', () => {
         if (mediaRecorder?.state === 'recording') {
           mediaRecorder.stop();
@@ -356,7 +177,6 @@ const startRecording = async () => {
     recBtn.textContent = 'Stop recording';
     setStatus('Recording');
   } catch (err) {
-    stopSpeechRecognition();
     stopStream();
     resetRecordingUi();
     setStatus('Ready');
@@ -369,7 +189,6 @@ const stopRecording = () => {
 
   recBtn.disabled = true;
   setStatus('Stopping');
-  stopSpeechRecognition();
   mediaRecorder.stop();
 };
 
@@ -380,7 +199,3 @@ recBtn?.addEventListener('click', () => {
     stopRecording();
   }
 });
-
-uploadBtn?.addEventListener('click', uploadPendingRecording);
-$('#openDashboard')?.addEventListener('click', () => openExtensionPage('recordings.html'));
-$('#openSettings')?.addEventListener('click', () => openExtensionPage('settings.html'));
