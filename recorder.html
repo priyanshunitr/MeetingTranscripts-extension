@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Recorder</title>
+  </head>
+  <body>
+    <h2>Screen Recorder</h2>
+    <div>
+      <button id="recToggle">Start Recording</button>
+      <a id="downloadLink" style="display:none;margin-left:8px;">Download</a>
+    </div>
+    <div style="margin-top:8px;">
+      <video id="preview" style="width:480px;height:270px;background:#000;" playsinline muted></video>
+    </div>
+
+    <script type="module" src="dist/recorder.js"></script>
+  </body>
+</html>

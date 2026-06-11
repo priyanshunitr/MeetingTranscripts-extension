@@ -1,24 +1,9 @@
-import random from 'lodash-es/random';
-
-const btn = document.getElementById('gen');
-const out = document.getElementById('out');
-
-function show() {
-  const n = random(1, 10);
-  console.log('random', n);
-  out.textContent = 'Random: ' + n;
-}
-
-btn?.addEventListener('click', show);
-show();
-
-// --- Screen recording UI ---
+// recorder.js — runs in a persistent extension window so getDisplayMedia remains active
+let mediaRecorder = null;
+let recordedChunks = [];
 const recBtn = document.getElementById('recToggle');
 const preview = document.getElementById('preview');
 const downloadLink = document.getElementById('downloadLink');
-
-let mediaRecorder = null;
-let recordedChunks = [];
 
 async function startRecording() {
   try {
@@ -58,20 +43,6 @@ function stopRecording() {
 }
 
 recBtn?.addEventListener('click', () => {
-  // Open a persistent recorder window so recording won't stop when popup loses focus
-  if (typeof chrome !== 'undefined' && chrome.windows && chrome.runtime) {
-    chrome.windows.create({
-      url: chrome.runtime.getURL('recorder.html'),
-      type: 'popup',
-      width: 520,
-      height: 420
-    }, () => {
-      // close the popup immediately to avoid duplicate UIs
-      try { window.close(); } catch (e) {}
-    });
-  } else {
-    // Fallback: start recording in the popup (may stop when focus is lost)
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') startRecording();
-    else stopRecording();
-  }
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') startRecording();
+  else stopRecording();
 });
