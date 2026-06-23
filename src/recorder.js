@@ -1,8 +1,14 @@
 import { $, formatBytes, formatDuration, setText, showMessage } from './ui.js';
+import {
+  mountLiveSpeechRecognition,
+  resetLiveTranscript,
+  startLiveSpeechRecognition,
+  stopLiveSpeechRecognition,
+} from './liveSpeechRecognition.jsx';
 
 let mediaRecorder = null;
 let mediaStream = null;
-let screenStream = null;
+let tabStream = null;
 let microphoneStream = null;
 let audioContext = null;
 let recordedChunks = [];
@@ -14,6 +20,9 @@ const recBtn = $('#recToggle');
 const preview = $('#preview');
 const downloadLink = $('#downloadLink');
 const message = $('#recordingMessage');
+const liveSpeechRoot = $('#liveSpeechRecognition');
+
+mountLiveSpeechRecognition(liveSpeechRoot);
 
 const supportedMimeType = () => {
   const candidates = [
@@ -45,12 +54,14 @@ const hasAudioTracks = (stream) => {
 
 const chooseDesktopMedia = () => {
   return new Promise((resolve, reject) => {
-    if (!chrome?.desktopCapture?.chooseDesktopMedia) {
-      reject(new Error('Chrome desktop capture is not available.'));
+    const desktopCapture = globalThis.chrome?.desktopCapture;
+
+    if (!desktopCapture?.chooseDesktopMedia) {
+      reject(new Error('Chrome tab capture is not available.'));
       return;
     }
 
-    chrome.desktopCapture.chooseDesktopMedia(
+    desktopCapture.chooseDesktopMedia(
       ['tab', 'audio'],
       (streamId, options) => {
         if (!streamId) {
@@ -67,32 +78,16 @@ const chooseDesktopMedia = () => {
   });
 };
 
-const captureDisplayStream = async () => {
-  if (!chrome?.desktopCapture?.chooseDesktopMedia) {
-    return navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: 30,
-      },
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 2,
-      },
-      systemAudio: 'include',
-      surfaceSwitching: 'include',
-    });
-  }
-
+const captureTabStream = async () => {
   const { streamId, canRequestAudioTrack } = await chooseDesktopMedia();
-  const desktopVideo = {
+  const tabVideo = {
     mandatory: {
       chromeMediaSource: 'desktop',
       chromeMediaSourceId: streamId,
       maxFrameRate: 30,
     },
   };
-  const desktopAudio = {
+  const tabAudio = {
     mandatory: {
       chromeMediaSource: 'desktop',
       chromeMediaSourceId: streamId,
@@ -101,8 +96,8 @@ const captureDisplayStream = async () => {
 
   try {
     return await navigator.mediaDevices.getUserMedia({
-      video: desktopVideo,
-      audio: canRequestAudioTrack ? desktopAudio : false,
+      video: tabVideo,
+      audio: canRequestAudioTrack ? tabAudio : false,
     });
   } catch (err) {
     if (!canRequestAudioTrack) throw err;
@@ -114,7 +109,7 @@ const captureDisplayStream = async () => {
     );
 
     return navigator.mediaDevices.getUserMedia({
-      video: desktopVideo,
+      video: tabVideo,
       audio: false,
     });
   }
@@ -127,8 +122,8 @@ const connectAudioSource = (destination, stream) => {
   source.connect(destination);
 };
 
-const buildRecorderStream = async (displayStream) => {
-  screenStream = displayStream;
+const buildRecorderStream = async (tabCaptureStream) => {
+  tabStream = tabCaptureStream;
 
   try {
     microphoneStream = await navigator.mediaDevices.getUserMedia({
@@ -142,8 +137,8 @@ const buildRecorderStream = async (displayStream) => {
     microphoneStream = null;
   }
 
-  const videoTracks = displayStream.getVideoTracks();
-  const audioStreams = [displayStream, microphoneStream].filter(
+  const videoTracks = tabCaptureStream.getVideoTracks();
+  const audioStreams = [tabCaptureStream, microphoneStream].filter(
     (stream) => hasAudioTracks(stream),
   );
 
@@ -164,12 +159,12 @@ const buildRecorderStream = async (displayStream) => {
 };
 
 const stopStream = () => {
-  [mediaStream, screenStream, microphoneStream].forEach((stream) => {
+  [mediaStream, tabStream, microphoneStream].forEach((stream) => {
     stream?.getTracks().forEach((track) => track.stop());
   });
 
   mediaStream = null;
-  screenStream = null;
+  tabStream = null;
   microphoneStream = null;
 
   if (audioContext) {
@@ -188,7 +183,7 @@ const resetRecordingUi = () => {
 };
 
 const buildFileName = () => {
-  return `screen-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+  return `tab-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
 };
 
 const prepareDownload = (blob, fileName) => {
@@ -207,6 +202,7 @@ const handleRecordingStopped = () => {
   const mimeType = mediaRecorder?.mimeType || supportedMimeType() || 'video/webm';
   const blob = new Blob(recordedChunks, { type: mimeType });
 
+  stopLiveSpeechRecognition().catch(() => undefined);
   stopStream();
   resetRecordingUi();
   setText('#sizeValue', formatBytes(blob.size));
@@ -224,12 +220,12 @@ const startRecording = async () => {
     setText('#durationValue', '0:00');
     setStatus('Requesting capture');
 
-    const displayStream = await captureDisplayStream();
-    mediaStream = await buildRecorderStream(displayStream);
-    preview.srcObject = displayStream;
+    const captureStream = await captureTabStream();
+    mediaStream = await buildRecorderStream(captureStream);
+    preview.srcObject = captureStream;
     await preview.play().catch(() => undefined);
 
-    if (!hasAudioTracks(displayStream)) {
+    if (!hasAudioTracks(captureStream)) {
       showMessage(
         message,
         'Tab audio was not shared. Select a Chrome tab that is playing audio and enable Share tab audio in the picker.',
@@ -253,7 +249,7 @@ const startRecording = async () => {
       }
     };
     mediaRecorder.onstop = handleRecordingStopped;
-    screenStream.getTracks().forEach((track) => {
+    tabStream.getTracks().forEach((track) => {
       track.addEventListener('ended', () => {
         if (mediaRecorder?.state === 'recording') {
           mediaRecorder.stop();
@@ -262,13 +258,16 @@ const startRecording = async () => {
     });
 
     mediaRecorder.start();
+    resetLiveTranscript();
+    startLiveSpeechRecognition().catch(() => undefined);
     recBtn.textContent = 'Stop recording';
     setStatus('Recording');
   } catch (err) {
+    stopLiveSpeechRecognition().catch(() => undefined);
     stopStream();
     resetRecordingUi();
     setStatus('Ready');
-    showMessage(message, err.message || 'Screen capture failed.', 'error');
+    showMessage(message, err.message || 'Tab capture failed.', 'error');
   }
 };
 

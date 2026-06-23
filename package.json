@@ -18,7 +18,11 @@
     "url": "https://github.com/priyanshunitr/MeetingTranscripts-extension/issues"
   },
   "homepage": "https://github.com/priyanshunitr/MeetingTranscripts-extension#readme",
-  "dependencies": {},
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-speech-recognition": "^4.0.1"
+  },
   "devDependencies": {
     "esbuild": "^0.28.0"
   }

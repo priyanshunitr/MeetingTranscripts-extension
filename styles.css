@@ -334,6 +334,19 @@ textarea {
   white-space: pre-wrap;
 }
 
+.speech-panel .section-title {
+  align-items: flex-start;
+}
+
+.transcript-block {
+  line-height: 1.6;
+  min-height: 120px;
+}
+
+.transcript-interim {
+  color: var(--muted);
+}
+
 .chat-log {
   display: grid;
   gap: 8px;

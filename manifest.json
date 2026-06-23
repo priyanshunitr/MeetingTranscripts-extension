@@ -1,6 +1,6 @@
 {
-  "name": "Screen Recorder",
-  "description": "Record your screen and download the recording locally.",
+  "name": "Tab Recorder",
+  "description": "Record one Chrome tab and download the recording locally.",
   "version": "1.0",
   "manifest_version": 3,
   "permissions": [
